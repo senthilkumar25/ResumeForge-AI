@@ -3,6 +3,7 @@
 # =========================================================
 
 import os
+from pydoc import doc
 import re
 import json
 import ast
@@ -16,33 +17,85 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 import subprocess
 import tempfile
+import time
+from collections import deque
+from langchain_google_genai import ChatGoogleGenerativeAI
+import html
+
+
 
 # =========================================================
-# ENV + LLM
+# LLM FACTORY (Groq + Gemini)
 # =========================================================
-def get_llm(groq_key):
-    if not groq_key:
-        raise ValueError("Groq API Key is required")
 
-    return ChatGroq(
-        model="openai/gpt-oss-120b",
-        groq_api_key=groq_key,
-        temperature=0.2
-    )
+def get_llm(provider: str, api_key: str, rpm: int, model: str):
+
+    if not api_key:
+        raise ValueError(f"{provider} API Key is required")
+
+    limiter = APIRateLimiter(rpm)
+
+    if provider.lower() == "groq":
+        llm = ChatGroq(
+            model=model,
+            groq_api_key=api_key,
+            temperature=0.2
+
+        )
+
+    elif provider.lower() == "gemini":
+        llm = ChatGoogleGenerativeAI(
+            model=model,
+            google_api_key=api_key,
+            temperature=0.2
+        )
+
+    else:
+        raise ValueError("Provider must be either 'groq' or 'gemini'")
+
+    return llm, limiter
+
+
+# =========================================================
+# RATE LIMITER
+# =========================================================
+
+class APIRateLimiter:
+    def __init__(self, rpm: int):
+        self.rpm = rpm
+        self.calls = deque()
+
+    def wait_if_needed(self):
+        current_time = time.time()
+
+        # Remove old timestamps
+        while self.calls and current_time - self.calls[0] > 60:
+            self.calls.popleft()
+
+        if len(self.calls) >= self.rpm:
+            sleep_time = 60 - (current_time - self.calls[0])
+            if sleep_time > 0:
+                print(f"Rate limit reached. Sleeping for {int(sleep_time)} seconds...")
+                time.sleep(sleep_time)
+
+        self.calls.append(time.time())
 
 # =========================================================
 # STATE
 # =========================================================
 
 class ResumeState(TypedDict):
+    structured_resume: Optional[Dict]
     resume_text: Optional[str]
     user_info: Optional[Dict]
     job_description: str
-    structured_resume: Optional[Dict]
     ats_score: Optional[Dict]
     gap_questions: Optional[list]
     user_answers: Optional[Dict]
-    groq_key: str   
+    provider: str
+    api_key: str
+    rpm: int
+    model: str  
 
 # =========================================================
 # UTILITIES
@@ -122,15 +175,31 @@ CRITICAL RULES (VERY IMPORTANT):
    - Use realistic conservative metrics.
    - Do NOT fabricate unrealistic numbers.
 
-4. TECHNICAL SKILLS STRUCTURE:
-   - Generate role-specific dynamic skill categories.
-   - Use intelligent grouping.
-   - Structure as key-value pairs.
-   - Example:
-        "technical_skills": {{
-            "Programming Languages": ["Python", "SQL"],
-            "Machine Learning": ["XGBoost", "Scikit-learn"]
-        }}
+4. SKILLS STRUCTURE (ROLE-ADAPTIVE):
+
+   - Detect industry/domain from Job Description.
+   - Create domain-specific skill categories dynamically.
+   - Examples:
+
+        For Finance:
+            "Financial Analysis": [...]
+            "Accounting Tools": [...]
+            "Regulatory Compliance": [...]
+
+        For Banking:
+            "Credit Risk Management": [...]
+            "Core Banking Systems": [...]
+
+        For Marketing:
+            "Digital Marketing": [...]
+            "Campaign Strategy": [...]
+
+        For Tech:
+            "Programming Languages": [...]
+            "Cloud & DevOps": [...]
+
+   - DO NOT force technical categories for non-tech roles.
+   - Skills must align with JD industry.
 
 5. PROFESSIONAL STRUCTURE:
    - Executive tone
@@ -155,6 +224,16 @@ CRITICAL RULES (VERY IMPORTANT):
    - Do NOT ask trivial questions.
    - Do NOT exceed 10 questions.
    - Minimum 5, Maximum 10.
+
+8.EXPERIENCE BULLET RULE (CRITICAL):
+
+    - Experience description MUST be a list of bullet points.
+    - Provide 3 to 6 bullet points per role.
+    - Each bullet must:
+        • Start with strong action verb
+        • Be 20–40 words
+        • Include measurable impact if possible
+    - DO NOT return paragraph descriptions.
 
 INTERNAL STRATEGY (Do NOT output this reasoning):
 1. Extract JD required skills & keywords.
@@ -225,7 +304,11 @@ RETURN STRICT JSON ONLY IN THIS FORMAT:
       "position": "",
       "company": "",
       "duration": "",
-      "description": ""
+      "description": [
+  "Bullet 1",
+  "Bullet 2",
+  "Bullet 3"
+     ]
     }}
   ],
 
@@ -273,16 +356,33 @@ STRICT REQUIREMENTS:
 - Do NOT include explanations.
 - Do NOT include markdown.
 - Do NOT include commentary.
+- DO NOT use markdown formatting like **bold**, *, or backticks.
 - If a section has no data, return empty list.
 """
 
-    llm = get_llm(state["groq_key"]) 
+    llm, limiter = get_llm(
+    state["provider"],
+    state["api_key"],
+    state["rpm"],
+     state["model"]
+)
+    print("Invoking LLM with prompt:", state["resume_text"][:500])  # Print the first 500 characters of the prompt for debugging
+    limiter.wait_if_needed()
     response = llm.invoke(prompt)
-    state["structured_resume"] = safe_json_parse(response.content)
+    print(3,response.content)
+    parsed = safe_json_parse(response.content)
+
+    if not parsed:
+        raise ValueError(
+            "LLM returned invalid or truncated JSON. "
+            "Increase max tokens or reduce prompt size."
+        )
+
+    state["structured_resume"] = parsed
     return state
 
 # =========================================================
-# NODE 2 — ATS SCORE (UNCHANGED)
+# NODE 2 — ADVANCED ATS SCORE
 # =========================================================
 
 def ats_score_node(state: ResumeState):
@@ -290,13 +390,63 @@ def ats_score_node(state: ResumeState):
     resume_text = json.dumps(state["structured_resume"])
     jd_text = state["job_description"]
 
-    keyword_score = calculate_keyword_score(resume_text, jd_text)
+    llm, limiter = get_llm(
+        state["provider"],
+        state["api_key"],
+        state["rpm"],
+         state["model"]
+    )
+
+    # -------- LLM KEYWORD EXTRACTION --------
+    jd_keywords, resume_keywords = extract_quality_keywords_llm(
+        resume_text,
+        jd_text,
+        llm,
+        limiter
+    )
+
+    if jd_keywords:
+        keyword_score = int(
+            (len(jd_keywords & resume_keywords) / len(jd_keywords)) * 100
+        )
+    else:
+        keyword_score = 0
+
+    # -------- QUANT SCORE --------
     quant_score = calculate_quant_score(resume_text)
-    overall = int((keyword_score * 0.6) + (quant_score * 0.4))
+
+    # -------- SEMANTIC RELEVANCE SCORE --------
+    relevance_prompt = f"""
+Rate resume relevance to JD from 0 to 100.
+Return ONLY integer.
+
+RESUME:
+{resume_text}
+
+JOB DESCRIPTION:
+{jd_text}
+"""
+
+    limiter.wait_if_needed()
+    relevance_response = llm.invoke(relevance_prompt)
+
+    try:
+        relevance_score = int(re.findall(r"\d+", relevance_response.content)[0])
+        relevance_score = max(0, min(100, relevance_score))
+    except:
+        relevance_score = 50
+
+    # -------- FINAL WEIGHTING --------
+    overall = int(
+        (keyword_score * 0.4) +
+        (quant_score * 0.2) +
+        (relevance_score * 0.4)
+    )
 
     state["ats_score"] = {
         "keyword_match_score": keyword_score,
         "quantification_score": quant_score,
+        "semantic_relevance_score": relevance_score,
         "overall_ats_score": overall
     }
 
@@ -343,8 +493,16 @@ Return STRICT JSON:
 
 {{ "questions": [] }}
 """
-    llm = get_llm(state["groq_key"]) 
+    llm, limiter = get_llm(
+    state["provider"],
+    state["api_key"],
+    state["rpm"],
+     state["model"]
+)
+
+    limiter.wait_if_needed()
     response = llm.invoke(prompt)
+    print("Gap LLM Output:", response.content[:500])
     data = safe_json_parse(response.content)
     state["gap_questions"] = data.get("questions", [])
     return state
@@ -369,9 +527,25 @@ USER ANSWERS:
 Return STRICT JSON only.
 """
 
-    llm = get_llm(state["groq_key"]) 
+    llm, limiter = get_llm(
+    state["provider"],
+    state["api_key"],
+    state["rpm"],
+     state["model"]
+)
+
+    limiter.wait_if_needed()
     response = llm.invoke(prompt)
-    state["structured_resume"] = safe_json_parse(response.content)
+    print(1,response.content)
+    parsed = safe_json_parse(response.content)
+
+    if not parsed:
+        raise ValueError(
+            "LLM returned invalid or truncated JSON. "
+            "Increase max tokens or reduce prompt size."
+        )
+
+    state["structured_resume"] = parsed
     return state
 
 # =========================================================
@@ -404,17 +578,66 @@ graph_update = builder2.compile()
 # ADDITIONAL ANALYSIS (NEW FEATURE)
 # =========================================================
 
-def extract_missing_keywords(structured_resume, jd_text):
+# =========================================================
+# LLM QUALITY KEYWORD EXTRACTION
+# =========================================================
 
-    resume_text = json.dumps(structured_resume).lower()
-    jd_words = set(re.findall(r"\b[A-Za-z]{4,}\b", jd_text.lower()))
-    resume_words = set(re.findall(r"\b[A-Za-z]{4,}\b", resume_text))
+def extract_quality_keywords_llm(resume_text, jd_text, llm, limiter):
 
-    generic = {"with", "have", "from", "this", "that", "will", "able"}
-    missing = [w for w in jd_words - resume_words if w not in generic]
+    prompt = f"""
+You are an ATS keyword intelligence engine.
+
+Extract ONLY high-impact technical and domain-specific keywords.
+
+Rules:
+- Extract only skill-based, tool-based, framework-based, role-based keywords.
+- Ignore generic words like 'team', 'communication', 'experience'.
+- Include multi-word phrases like:
+  - Machine Learning
+  - Credit Risk Modeling
+  - Kubernetes Deployment
+  - SQL Optimization
+
+Return STRICT JSON:
+
+{{
+ "jd_keywords": [],
+ "resume_keywords": []
+}}
+
+JOB DESCRIPTION:
+{jd_text}
+
+RESUME:
+{resume_text}
+"""
+
+    limiter.wait_if_needed()
+    response = llm.invoke(prompt)
+    print(2,response.content)
+    data = safe_json_parse(response.content)
+
+    return (
+        set(data.get("jd_keywords", [])),
+        set(data.get("resume_keywords", []))
+    )
+
+def extract_missing_keywords(structured_resume, jd_text, provider, api_key, rpm,model):
+
+    llm, limiter = get_llm(provider, api_key, rpm,model)
+
+    resume_text = json.dumps(structured_resume)
+
+    jd_keywords, resume_keywords = extract_quality_keywords_llm(
+        resume_text,
+        jd_text,
+        llm,
+        limiter
+    )
+
+    missing = list(jd_keywords - resume_keywords)
 
     return missing[:15]
-
 
 def generate_match_insight(ats_score):
 
@@ -435,7 +658,7 @@ def generate_match_insight(ats_score):
 # PUBLIC FUNCTIONS (ENHANCED)
 # =========================================================
 
-def initial_build(uploaded_file=None, user_info=None, job_description="", groq_key=""):
+def initial_build(uploaded_file=None,user_info=None,job_description="", provider="groq",api_key="", rpm=30, model="openai/gpt-oss-120b"):
 
     resume_text = ""
 
@@ -444,19 +667,33 @@ def initial_build(uploaded_file=None, user_info=None, job_description="", groq_k
             resume_text = extract_text_from_pdf(uploaded_file.read())
         elif uploaded_file.type == "text/plain":
             resume_text = uploaded_file.read().decode("utf-8")
+    print("Extracted Resume Text:", resume_text[:500])
 
     resume_text = clean_text(resume_text)
+    print("Extracted Resume Text:", resume_text[:500])
 
     result = graph_initial.invoke({
     "resume_text": resume_text,
     "user_info": user_info,
     "job_description": job_description,
-    "groq_key": groq_key
-     })
+    "provider": provider,
+    "api_key": api_key,
+    "rpm": rpm,
+    "model": model
+    })
+    print("State_result",result["structured_resume"])
+
 
     # Additional Analysis Layer
     level, inference = generate_match_insight(result["ats_score"])
-    missing = extract_missing_keywords(result["structured_resume"], job_description)
+    missing = extract_missing_keywords(
+    result["structured_resume"],
+    job_description,
+    provider,
+    api_key,
+    rpm,
+    model
+)
 
     result["additional_analysis"] = {
         "match_level": level,
@@ -467,16 +704,25 @@ def initial_build(uploaded_file=None, user_info=None, job_description="", groq_k
     return result
 
 
-def update_resume(existing_resume, user_answers, job_description,groq_key):
+def update_resume(    existing_resume, user_answers, job_description,provider="groq",api_key="",rpm=30,model="openai/gpt-oss-120b"):
 
     result = graph_update.invoke({
-        "structured_resume": existing_resume,
-        "user_answers": user_answers,
-        "job_description": job_description,
-        "groq_key": groq_key 
-    })
+    "structured_resume": existing_resume,
+    "user_answers": user_answers,
+    "job_description": job_description,
+    "provider": provider,
+    "api_key": api_key,
+    "rpm": rpm,
+    "model": model
+     })
     level, inference = generate_match_insight(result["ats_score"])
-    missing = extract_missing_keywords(result["structured_resume"], job_description)
+    missing = extract_missing_keywords(
+    result["structured_resume"],
+    job_description,
+    provider,
+    api_key,
+    rpm,model
+   )
 
     result["additional_analysis"] = {
         "match_level": level,
@@ -491,6 +737,17 @@ def update_resume(existing_resume, user_answers, job_description,groq_key):
 # TEMPLATE + PDF SUPPORT (NEW)
 # =========================================================
 
+
+def sanitize_for_docx(data):
+    if isinstance(data, dict):
+        return {k: sanitize_for_docx(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_for_docx(v) for v in data]
+    elif isinstance(data, str):
+        return html.escape(data)
+    else:
+        return data
+
 def generate_docx(structured_resume, template_name="Classic"):
 
     template_map = {
@@ -502,7 +759,9 @@ def generate_docx(structured_resume, template_name="Classic"):
     template_path = template_map.get(template_name, "templates/classic.docx")
 
     doc = DocxTemplate(template_path)
-    doc.render(structured_resume)
+    safe_data = sanitize_for_docx(structured_resume)
+    doc.render(safe_data)
+    # doc.render(structured_resume)
 
     buffer = BytesIO()
     doc.save(buffer)
@@ -511,29 +770,89 @@ def generate_docx(structured_resume, template_name="Classic"):
     return buffer
 
 
-def generate_pdf_from_docx(docx_buffer):
+# =========================================================
+# SMART PDF GENERATOR (WINDOWS + WEBSITE SUPPORT)
+# =========================================================
+
+
+
+
+def generate_pdf_from_docx(docx_buffer, environment="website"):
+
+    import os
+    import tempfile
+    import subprocess
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
         tmp_docx.write(docx_buffer.read())
         tmp_docx_path = tmp_docx.name
 
-    # Convert DOCX to PDF using LibreOffice (Linux safe)
-    subprocess.run([
-        "soffice",
-        "--headless",
-        "--convert-to", "pdf",
-        tmp_docx_path,
-        "--outdir", os.path.dirname(tmp_docx_path)
-    ], check=True)
-
     pdf_path = tmp_docx_path.replace(".docx", ".pdf")
 
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
+    try:
 
-    os.remove(tmp_docx_path)
-    os.remove(pdf_path)
+        # ======================================================
+        # WEBSITE / LINUX MODE (LibreOffice)
+        # ======================================================
+        if environment == "website":
+            try:
+                subprocess.run([
+                    "soffice",
+                    "--headless",
+                    "--convert-to", "pdf",
+                    tmp_docx_path,
+                    "--outdir", os.path.dirname(tmp_docx_path)
+                ], check=True)
+            except FileNotFoundError:
+                raise Exception(
+                    "LibreOffice (soffice) not found. "
+                    "Install LibreOffice or switch to Windows mode."
+                )
 
-    return pdf_bytes
+        # ======================================================
+        # WINDOWS MODE (MS Word COM)
+        # ======================================================
+        elif environment == "windows":
+            try:
+                import pythoncom
+                import win32com.client
 
+                pythoncom.CoInitialize()
 
+                word = win32com.client.Dispatch("Word.Application")
+                doc = word.Documents.Open(tmp_docx_path)
+                doc.SaveAs(pdf_path, FileFormat=17)
+                doc.Close()
+                word.Quit()
+
+                pythoncom.CoUninitialize()
+
+            
+            except Exception as e:
+                raise Exception(
+                    f"MS Word conversion failed. "
+                    f"Ensure Microsoft Word is installed.\n\n{str(e)}"
+                )
+
+        else:
+            raise ValueError("Invalid environment selected.")
+
+        # ======================================================
+        # READ GENERATED PDF
+        # ======================================================
+        if not os.path.exists(pdf_path):
+            raise Exception("PDF file was not created.")
+
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        return pdf_bytes
+
+    finally:
+        # Always clean temp DOCX
+        if os.path.exists(tmp_docx_path):
+            os.remove(tmp_docx_path)
+
+        # Clean PDF if exists
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
