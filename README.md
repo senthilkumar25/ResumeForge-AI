@@ -1,151 +1,184 @@
-🚀 ResumeForge AI
-Intelligent ATS Optimization Engine
+---
+# 🤖 ResumeForge AI  
+### Intelligent ATS Optimization Engine  
 <p align="center">  <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python" /> <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" /> <img src="https://img.shields.io/badge/Streamlit-App-ff4b4b?style=for-the-badge&logo=streamlit" /> <img src="https://img.shields.io/badge/LangGraph-Agentic-purple?style=for-the-badge" /> <img src="https://img.shields.io/badge/LLM-Groq%20%7C%20Gemini-orange?style=for-the-badge" /> </p> <p align="center"> <b>Agentic Resume Intelligence powered by Hybrid ATS Scoring & Semantic Alignment</b> </p>
-🧠 Overview
 
-ResumeForge AI is a full-stack, LLM-powered resume optimization system designed to maximize Applicant Tracking System (ATS) compatibility using structured validation, semantic reasoning, and hybrid scoring intelligence.
+ResumeForge AI is an intelligent, full-stack agentic workflow designed to optimize resumes for Applicant Tracking Systems (ATS) compatibility using hybrid scoring and semantic reasoning.
 
-Unlike traditional resume builders that rely on keyword stuffing, ResumeForge AI treats resume optimization as an agentic workflow, ensuring:
+It doesn’t just rewrite resumes — it structures them, scores them, identifies skill gaps, and iteratively improves alignment using semantic intelligence powered by LLMs.
 
-📊 Measurable impact enforcement
+---
 
-🔎 Context-aware job alignment
+## 🚀 Key Features
 
-⚖️ Balanced keyword + semantic scoring
+### 🧠 Intelligent Resume Structuring
+Transforms unstructured resumes (PDF/TXT) into structured, validated JSON:
+- Professional Summary  
+- Experience  
+- Skills  
+- Projects  
+- Certifications  
 
-🔁 Iterative improvement with score tracking
+Strict no-hallucination enforcement ensures accuracy and reliability.
 
-It doesn’t just rewrite resumes — it analyzes, scores, identifies skill gaps, and continuously refines alignment with job descriptions.
+---
 
-✨ Core Capabilities
-🎯 Hybrid ATS Scoring Engine
+### 🎯 Hybrid ATS Scoring Engine
 
-A multi-dimensional scoring framework combining:
+Multi-dimensional scoring framework:
 
-🔑 Keyword Match Score – High-impact skill overlap
+- 🔑 **Keyword Match Score** – High-impact skill overlap  
+- 📈 **Quantification Score** – Measurable achievements detection  
+- 🧠 **Semantic Relevance Score** – Context-aware LLM alignment  
+- ⚠️ **Missing Skills Analysis** – Gap detection vs Job Description  
 
-📈 Quantification Score – Detection of measurable outcomes
-
-🧠 Semantic Relevance Score – LLM-based contextual alignment
-
-⚠️ Missing Skill Detection – Gap analysis against JD
-
+```text
 Overall ATS Score =
 (Keyword × 0.4) +
 (Quantification × 0.2) +
 (Semantic × 0.4)
+```
 
-This ensures resumes are optimized both syntactically (keywords) and semantically (context).
+This ensures resumes are optimized both syntactically and semantically.
 
-🔄 Agentic Optimization Workflow (LangGraph)
+---
 
-ResumeForge AI is built as a deterministic state machine:
+### 🔄 Agentic Optimization Workflow (LangGraph)
 
-1️⃣ Generate Structured Resume
-2️⃣ Compute ATS Score
-3️⃣ Identify Missing High-Impact Skills
-4️⃣ Generate Strategic Gap Questions
-5️⃣ Apply Improvements
-6️⃣ Re-score & Compare Before/After
+ResumeForge AI models resume enhancement as a deterministic state machine:
 
-This creates a feedback-driven optimization loop.
+1️⃣ Generate Structured Resume  
+2️⃣ Compute ATS Score  
+3️⃣ Detect Missing High-Impact Skills  
+4️⃣ Generate Strategic Gap Questions  
+5️⃣ Apply Improvements  
+6️⃣ Re-score & Compare  
 
-🧠 Intelligent Resume Structuring
+This creates a continuous feedback-driven optimization loop.
 
-Converts unstructured PDF/TXT resumes into structured JSON
+---
 
-Enforces strict no-hallucination policy
+### 🌍 Multi-LLM Support
 
-Removes markdown noise and formatting artifacts
+- Groq (Llama 3 / GPT-OSS)  
+- Google Gemini  
+- Dynamic provider selection  
+- RPM-based rate limiting  
 
-Validates schema before scoring
+Designed for flexibility and production safety.
 
-🌍 Multi-LLM Architecture
+---
 
-Supports multiple providers:
-
-🟠 Groq (Llama 3 / GPT-OSS models)
-
-🔵 Google Gemini
-
-Includes:
-
-Dynamic provider switching
-
-RPM-based rate limiting
-
-Clean abstraction layer
-
-🖥️ Cross-Platform PDF Engine
+### 🖥️ Cross-Platform PDF Engine
 
 Built for both local and cloud environments:
 
-🪟 Windows → MS Word (docx2pdf)
-
-☁️ Cloud → Pure Python (ReportLab fallback)
-
-🛡️ Automatic fail-safe conversion
+- Windows → MS Word (docx2pdf)  
+- Cloud / Linux → Pure Python (ReportLab fallback)  
+- Automatic fail-safe handling  
 
 No environment lock-in.
 
-🏗️ Architecture
-Layer	Technology
-🎨 Frontend	Streamlit
-🧠 Orchestration	LangChain + LangGraph
-🤖 LLM Providers	Groq / Gemini
-📄 Resume Parsing	PyMuPDF
-📦 PDF Engine	docx2pdf + ReportLab
-🔍 Validation	Regex + JSON sanitation
+---
 
-The system treats resume optimization as a structured state transition graph rather than a single LLM call.
+## 🏗️ Architecture
 
-🎯 Designed For
+The system is built on **LangGraph**, treating resume optimization as a structured state machine.
 
-ResumeForge AI dynamically adapts skill categorization based on Job Description context and supports:
+### Core Nodes
 
-👨‍💻 Developers
+- Generate Resume Node  
+- ATS Score Node  
+- Gap Analysis Node  
+- Resume Update Node  
 
-📊 Data Scientists
+Each transition is validated and production-safe.
 
-💼 Accountants
+---
 
-🏦 Banking & Finance Professionals
+## 🛠️ Tech Stack
 
-📈 Marketing & Sales
+| Layer | Technology |
+|-------|------------|
+| Frontend | Streamlit |
+| Orchestration | LangChain + LangGraph |
+| LLM Providers | Groq, Gemini |
+| Resume Parsing | PyMuPDF |
+| PDF Engine | docx2pdf, ReportLab |
+| Validation | Regex + JSON sanitation |
 
-🧑‍💼 HR & Operations
+---
 
-🎓 MBA Graduates & Freshers
+## ⚡ Quick Start
 
-⚡ Quick Start
-1️⃣ Clone Repository
+### 1️⃣ Clone Repository
+
+```bash
 git clone https://github.com/your-username/ResumeForge-AI.git
 cd ResumeForge-AI
-2️⃣ Install Dependencies
+```
+
+### 2️⃣ Install Dependencies
+
+```bash
 pip install -r requirements.txt
-3️⃣ Configure API Keys
-GROQ_API_KEY=your_key
-GEMINI_API_KEY=your_key
-4️⃣ Run Application
+```
+
+### 3️⃣ Configure API Keys
+
+```env
+GROQ_API_KEY=your_groq_api_key
+GEMINI_API_KEY=your_gemini_api_key
+```
+
+### 4️⃣ Run Application
+
+```bash
 streamlit run app.py
-🚀 Why ResumeForge AI?
+```
 
-Most resume tools:
+---
 
-Insert buzzwords
+## 🖥️ Usage Guide
 
-Inflate metrics
+### Generate Mode
+Upload your resume and paste a job description.  
+The system structures your resume and generates a complete ATS compatibility report.
 
-Ignore contextual alignment
+### Improve Mode
+Answer AI-generated strategic gap questions.  
+The system refines your resume and displays before/after score improvements.
 
-ResumeForge AI enforces:
+### Analyze Mode
+Review missing skills, alignment insights, and semantic breakdown.
 
-✔ Truth validation
-✔ Quantified achievements
-✔ Context-aware semantic scoring
-✔ Iterative optimization
-✔ Structured ATS intelligence
+---
 
-It is built not as a resume writer — but as a resume intelligence engine.
+## 🎯 Supported Domains
 
-Website: https://resume-deep-ai-agent.onrender.com/
+ResumeForge AI dynamically adapts skill categorization and supports:
+
+- Data Science  
+- Software Engineering  
+- Accounting & Finance  
+- Banking  
+- Marketing  
+- HR & Operations  
+- MBA / Freshers  
+
+---
+
+<img width="951" height="443" alt="image" src="https://github.com/user-attachments/assets/3c56be69-0e4e-4fd1-918c-82b7794d28d6" />
+
+---
+<img width="953" height="428" alt="image" src="https://github.com/user-attachments/assets/b63e932f-fb3f-47f2-a65d-b403f3291651" />
+
+---
+<img width="807" height="421" alt="image" src="https://github.com/user-attachments/assets/362961f7-09ed-4b2a-9f4e-21308e324818" />
+
+
+---
+## 🌐 Live Demo
+
+🚀 Try ResumeForge AI Online:  
+👉 https://resume-deep-ai-agent.onrender.com/
