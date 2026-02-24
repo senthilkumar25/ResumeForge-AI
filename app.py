@@ -46,17 +46,65 @@ st.sidebar.header("📌 Candidate Information")
 
 uploaded_resume = st.sidebar.file_uploader("Upload Resume", type=["pdf", "txt"])
 
-st.sidebar.header("🔐 Groq Configuration")
+# ======================================================
+# LLM CONFIGURATION
+# ======================================================
 
-groq_key = st.sidebar.text_input(
-    "Enter Your GROQ API Key",
+st.sidebar.header("🤖 LLM Configuration")
+
+provider = st.sidebar.selectbox(
+    "Select LLM Provider",
+    ["Groq", "Gemini"]
+)
+# -------------------------
+# MODEL LIST PER PROVIDER
+# -------------------------
+
+groq_models =["openai/gpt-oss-120b","whisper-large-v3-turbo","whisper-large-v3-turbo","llama-3.3-70b-versatile","Other"]
+
+gemini_models = ["gemini-2.5-flash","gemini-3-flash-preview","gemini-2.5-flash-lite","gemma-3-27b-it","Other"]
+if provider == "Groq":
+    model_choice = st.sidebar.selectbox(
+        "Select Groq Model",
+        groq_models
+    )
+else:
+    model_choice = st.sidebar.selectbox(
+        "Select Gemini Model",
+        gemini_models
+    )
+
+# If user selects "Other"
+if model_choice == "Other":
+    custom_model = st.sidebar.text_input(
+        "Enter Custom Model Name"
+    )
+    selected_model = custom_model
+else:
+    selected_model = model_choice
+
+st.sidebar.caption("⚠ Larger models support longer resumes and reduce JSON truncation risk.")
+
+api_key = st.sidebar.text_input(
+    f"Enter {provider} API Key",
     type="password"
 )
+
+rpm = st.sidebar.number_input(
+    "Requests Per Minute (RPM Limit)",
+    min_value=1,
+    max_value=60,
+    value=5 if provider == "Gemini" else 30
+)
+
 name = st.sidebar.text_input("Name")
 email = st.sidebar.text_input("Email")
 phone = st.sidebar.text_input("Phone")
 summary = st.sidebar.text_area("Professional Summary")
-skills = st.sidebar.text_area("Skills (comma separated)")
+skills = st.sidebar.text_area(
+    "Core Skills / Functional Skills (comma separated)",
+    help="Example: Financial Modeling, Risk Analysis, Python, CRM, SAP, Taxation, etc."
+)
 education = st.sidebar.text_area("Education")
 projects = st.sidebar.text_area("Projects")
 
@@ -68,10 +116,28 @@ template_choice = st.selectbox(
     "Select Resume Template",
     ["Classic", "Modern", "Minimal"]
 )
+# ======================================================
+# PDF ENVIRONMENT CONFIG
+# ======================================================
 
+st.sidebar.header("📄 PDF Generation Mode")
+
+environment = st.sidebar.selectbox(
+    "Select Runtime Environment",
+    ["Windows (Local Machine)", "Website (Linux/Cloud)"]
+)
+
+if environment.startswith("Windows"):
+    runtime_env = "windows"
+else:
+    runtime_env = "website"
 # ======================================================
 # GENERATE RESUME
 # ======================================================
+
+if not job_description:
+    st.warning("Please paste Job Description before generating.")
+
 
 if st.button("🚀 Generate Optimized Resume"):
    with st.spinner("Analyzing JD and Optimizing Resume..."):
@@ -86,7 +152,7 @@ if st.button("🚀 Generate Optimized Resume"):
             "projects": projects
         }
 
-        result = initial_build(uploaded_resume,user_info,job_description,groq_key)
+        result = initial_build(uploaded_resume,user_info,job_description, provider.lower(),api_key,rpm,selected_model)
 
         st.session_state.resume_data = result["structured_resume"]
         st.session_state.questions = result["gap_questions"]
@@ -112,12 +178,15 @@ if st.session_state.ats_score:
     overall = st.session_state.ats_score["overall_ats_score"]
     keyword = st.session_state.ats_score["keyword_match_score"]
     quant = st.session_state.ats_score["quantification_score"]
+    semantic = st.session_state.ats_score.get("semantic_relevance_score", 0)
 
-    col1, col2, col3 = st.columns(3)
+
+    col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Overall ATS Score", overall)
     col2.metric("Keyword Match", keyword)
     col3.metric("Quantification", quant)
+    col4.metric("Semantic Relevance", semantic)
 
     st.progress(overall / 100)
 
@@ -135,8 +204,10 @@ if st.session_state.additional_analysis:
     st.info(analysis["inference"])
 
     if analysis["missing_keywords"]:
-        st.warning("Missing JD Keywords")
-        st.write(", ".join(analysis["missing_keywords"]))
+        st.warning("High-Impact Missing Skills From JD")
+
+        for skill in analysis["missing_keywords"]:
+            st.markdown(f"- 🔹 {skill}")
     else:
         st.success("No major JD keywords missing.")
 
@@ -158,12 +229,7 @@ if st.session_state.questions:
 
         with st.spinner("Enhancing resume..."):
 
-            updated = update_resume(
-    		st.session_state.resume_data,
-    		answers,
-    		st.session_state.job_description,groq_key
-		)
-
+            updated = update_resume(st.session_state.resume_data,answers,st.session_state.job_description,provider.lower(), api_key,rpm,selected_model)
             st.session_state.resume_data = updated["structured_resume"]
             st.session_state.ats_score = updated["ats_score"]
             st.session_state.additional_analysis = updated.get("additional_analysis")
@@ -196,7 +262,7 @@ if st.session_state.ats_score_before and st.session_state.ats_score:
 # STRUCTURED RESUME PREVIEW + EDIT
 # ======================================================
 
-if st.session_state.resume_data:
+if st.session_state.resume_data is not None:
 
     st.subheader("📄 Structured Resume Editor")
 
@@ -211,11 +277,7 @@ if st.session_state.resume_data:
             updated_resume = json.loads(edited_json)
             st.session_state.resume_data = updated_resume
 
-            updated = update_resume(
-                updated_resume,
-                {},
-                st.session_state.job_description,groq_key
-            )
+            updated = update_resume(updated_resume, {}, st.session_state.job_description,provider.lower(),api_key,rpm,selected_model)
 
             st.session_state.ats_score = updated["ats_score"]
             st.success("ATS Recalculated Successfully!")
@@ -227,7 +289,7 @@ if st.session_state.resume_data:
 # DOWNLOAD SECTION
 # ======================================================
 
-if st.session_state.resume_data:
+if st.session_state.resume_data is not None:
 
     st.subheader("⬇ Download Final Resume")
 
@@ -240,7 +302,7 @@ if st.session_state.resume_data:
                 template_choice
             )
 
-            pdf_file = generate_pdf_from_docx(doc_file)
+            pdf_file = generate_pdf_from_docx(doc_file, runtime_env)
 
         st.download_button(
             "Download DOCX",
